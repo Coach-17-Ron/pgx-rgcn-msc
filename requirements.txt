@@ -1,0 +1,14 @@
+# Pin to versions tested on the canonical RUN_ID 20260526_200022
+# Adjust torch/torch_geometric to match your CUDA version on ilifu
+numpy==1.26.4
+pandas==2.1.4
+scipy==1.11.4
+torch==2.1.2
+torch-geometric==2.5.0
+networkx==3.2.1
+matplotlib==3.8.2
+requests==2.31.0
+pyyaml==6.0.1
+jupyter==1.0.0
+ipykernel==6.29.0
+pyarrow==15.0.0       # for parquet IO

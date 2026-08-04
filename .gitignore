@@ -1,0 +1,43 @@
+# Raw data and generated artifacts
+data/
+artifacts/
+results/
+
+# Logs
+*.log
+*.out
+*.err
+slurm-*.out
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Model and binary files
+*.pt
+*.pth
+*.ckpt
+*.parquet
+*.pkl
+*.pickle
+
+# Temporary files
+*.bak
+*.bak_*
+*.tmp
+*.temp
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
