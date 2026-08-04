@@ -1,28 +1,39 @@
 #!/usr/bin/env python3
-"""Generate graph-construction figures from audited graph artifacts."""
+"""Generate clean thesis-ready graph-construction visuals."""
 
 from __future__ import annotations
 
-import argparse
 import json
-from collections import defaultdict
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import FancyArrowPatch
 import networkx as nx
-import numpy as np
 import pandas as pd
 
 
 GRAPH_DIR = Path("artifacts/graph")
-RESULTS_DIR = Path("results/figures")
+FIGURE_DIR = Path("results/figures")
 AUDIT_DIR = Path("results/audits")
 
-NODES_PATH = GRAPH_DIR / "nodes.parquet"
-EDGES_PATH = GRAPH_DIR / "edges.parquet"
-MANIFEST_PATH = GRAPH_DIR / "graph_manifest.json"
+NODE_COLOURS = {
+    "drug": "#4C78A8",
+    "gene": "#F58518",
+    "variant": "#54A24B",
+    "phenotype": "#E45756",
+}
 
-NODE_ORDER = ["gene", "variant", "drug", "phenotype"]
+EVIDENCE_COLOURS = {
+    "clinical": "#4C78A8",
+    "label": "#F58518",
+    "pathway": "#54A24B",
+    "guideline": "#B279A2",
+    "literature": "#9D755D",
+    "other": "#BAB0AC",
+}
+
 NODE_SHAPES = {
     "drug": "o",
     "gene": "s",
@@ -31,700 +42,515 @@ NODE_SHAPES = {
 }
 
 
+def set_plot_defaults() -> None:
+    """Apply consistent figure defaults."""
+    plt.rcParams.update(
+        {
+            "font.family": "DejaVu Sans",
+            "font.size": 11,
+            "axes.titlesize": 15,
+            "axes.labelsize": 12,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 11,
+            "figure.dpi": 120,
+        }
+    )
+
+
 def save_figure(fig: plt.Figure, stem: str) -> None:
-    """Save one figure in vector and high-resolution raster formats."""
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    """Save a figure as PNG, PDF and SVG."""
+    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
     fig.savefig(
-        RESULTS_DIR / f"{stem}.svg",
-        bbox_inches="tight",
-    )
-    fig.savefig(
-        RESULTS_DIR / f"{stem}.pdf",
-        bbox_inches="tight",
-    )
-    fig.savefig(
-        RESULTS_DIR / f"{stem}.png",
+        FIGURE_DIR / f"{stem}.png",
         dpi=300,
         bbox_inches="tight",
+        facecolor="white",
     )
+    fig.savefig(
+        FIGURE_DIR / f"{stem}.pdf",
+        bbox_inches="tight",
+        facecolor="white",
+    )
+    fig.savefig(
+        FIGURE_DIR / f"{stem}.svg",
+        bbox_inches="tight",
+        facecolor="white",
+    )
+
     plt.close(fig)
 
 
-def load_artifacts() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    nodes = pd.read_parquet(NODES_PATH)
-    edges = pd.read_parquet(EDGES_PATH)
+def wrap_label(value: object, width: int = 18) -> str:
+    """Wrap long node labels across multiple lines."""
+    return "\n".join(
+        textwrap.wrap(
+            str(value),
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+    )
 
-    with MANIFEST_PATH.open("r", encoding="utf-8") as handle:
+
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Load graph nodes, edges and manifest."""
+    nodes = pd.read_parquet(GRAPH_DIR / "nodes.parquet")
+    edges = pd.read_parquet(GRAPH_DIR / "edges.parquet")
+
+    with (GRAPH_DIR / "graph_manifest.json").open(
+        "r",
+        encoding="utf-8",
+    ) as handle:
         manifest = json.load(handle)
 
     return nodes, edges, manifest
 
 
-def plot_filtering_waterfall(manifest: dict) -> None:
-    raw = manifest["raw_relationship_rows"]
-    excluded = manifest["excluded_haplotype_rows"]
-    final = manifest["total_edges"]
-
-    labels = [
-        "Raw relationships",
-        "Haplotype-related\nexclusions",
-        "Final KG edges",
-    ]
-
-    values = [raw, -excluded, final]
-    starts = [0, raw, 0]
-
-    fig, ax = plt.subplots(figsize=(8, 5.5))
-
-    for index, (label, value, start) in enumerate(
-        zip(labels, values, starts)
-    ):
-        ax.bar(
-            index,
-            value,
-            bottom=start,
-            width=0.62,
-        )
-
-        if value >= 0:
-            label_y = start + value
-            vertical_alignment = "bottom"
-            offset = 1000
-        else:
-            label_y = start + value
-            vertical_alignment = "top"
-            offset = -1000
-
-        prefix = "−" if value < 0 else ""
-        ax.text(
-            index,
-            label_y + offset,
-            f"{prefix}{abs(value):,}",
-            ha="center",
-            va=vertical_alignment,
-            fontweight="bold",
-        )
-
-    ax.plot(
-        [0.31, 0.69],
-        [raw, raw],
-        linestyle="--",
-        linewidth=1,
-    )
-    ax.plot(
-        [1.31, 1.69],
-        [final, final],
-        linestyle="--",
-        linewidth=1,
-    )
-
-    retention = 100 * final / raw
-
-    ax.text(
-        1,
-        final / 2,
-        f"{retention:.1f}% retained",
-        ha="center",
-        va="center",
-    )
-
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Relationship records")
-    ax.set_title("Relationship filtering during graph construction")
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.grid(axis="y", alpha=0.25)
-
-    save_figure(fig, "graph_filtering_waterfall")
-
-
 def plot_node_composition(nodes: pd.DataFrame) -> None:
+    """Plot graph node counts and percentages."""
+    order = ["gene", "variant", "drug", "phenotype"]
+
     counts = (
         nodes["node_type"]
         .value_counts()
-        .reindex(NODE_ORDER)
-        .dropna()
+        .reindex(order)
         .astype(int)
     )
 
     total = int(counts.sum())
-    percentages = 100 * counts / total
 
-    fig, ax = plt.subplots(figsize=(8, 5.5))
+    fig, ax = plt.subplots(figsize=(8.5, 5.2))
 
     bars = ax.barh(
-        counts.index.str.title(),
+        [item.title() for item in counts.index],
         counts.values,
+        color=[NODE_COLOURS[item] for item in counts.index],
+        height=0.62,
     )
 
     ax.invert_yaxis()
 
-    for bar, count, percentage in zip(
-        bars,
-        counts.values,
-        percentages.values,
-    ):
+    for bar, count in zip(bars, counts.values):
+        percentage = 100 * count / total
+
         ax.text(
-            bar.get_width() + total * 0.012,
+            bar.get_width() + 400,
             bar.get_y() + bar.get_height() / 2,
             f"{count:,} ({percentage:.1f}%)",
             va="center",
+            fontsize=11,
         )
 
+    ax.set_xlim(0, 29_500)
     ax.set_xlabel("Number of nodes")
     ax.set_title(
-        f"Node composition of the reconstructed graph (n={total:,})"
+        "Node composition of the pharmacogenomic knowledge graph",
+        pad=16,
     )
+
+    ax.grid(axis="x", alpha=0.2)
+    ax.set_axisbelow(True)
     ax.spines[["top", "right", "left"]].set_visible(False)
-    ax.grid(axis="x", alpha=0.25)
     ax.tick_params(axis="y", length=0)
-    ax.set_xlim(0, counts.max() * 1.25)
+
+    ax.text(
+        0.99,
+        -0.14,
+        f"Total nodes: {total:,}",
+        transform=ax.transAxes,
+        ha="right",
+        fontsize=10,
+    )
+
+    fig.subplots_adjust(
+        left=0.16,
+        right=0.94,
+        top=0.86,
+        bottom=0.18,
+    )
 
     save_figure(fig, "graph_node_composition")
 
 
-def plot_metagraph(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
+def plot_filtering_flow(manifest: dict) -> None:
+    """Plot the relationship filtering and retention process."""
+    raw = int(manifest["raw_relationship_rows"])
+    excluded = int(manifest["excluded_haplotype_rows"])
+    retained = int(manifest["total_edges"])
+    retention = 100 * retained / raw
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    ax.axis("off")
+
+    positions = [0.15, 0.50, 0.85]
+    values = [raw, excluded, retained]
+
+    headings = [
+        "Raw relationships",
+        "Excluded",
+        "Final graph edges",
+    ]
+
+    descriptions = [
+        "ClinPGx relationship records",
+        "Haplotype-related records",
+        "All in-scope records mapped",
+    ]
+
+    colours = [
+        NODE_COLOURS["drug"],
+        NODE_COLOURS["phenotype"],
+        NODE_COLOURS["variant"],
+    ]
+
+    for x, value, heading, description, colour in zip(
+        positions,
+        values,
+        headings,
+        descriptions,
+        colours,
+    ):
+        ax.text(
+            x,
+            0.66,
+            f"{value:,}",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=26,
+            fontweight="bold",
+            color=colour,
+        )
+
+        ax.text(
+            x,
+            0.46,
+            heading,
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=13,
+            fontweight="bold",
+        )
+
+        ax.text(
+            x,
+            0.33,
+            description,
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="#555555",
+        )
+
+    for start, end in [(0.26, 0.39), (0.61, 0.74)]:
+        arrow = FancyArrowPatch(
+            (start, 0.52),
+            (end, 0.52),
+            transform=ax.transAxes,
+            arrowstyle="-|>",
+            mutation_scale=18,
+            linewidth=1.8,
+            color="#555555",
+        )
+        ax.add_patch(arrow)
+
+    ax.text(
+        0.5,
+        0.12,
+        f"{retention:.1f}% of raw relationship records retained",
+        transform=ax.transAxes,
+        ha="center",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    ax.set_title(
+        "Relationship filtering and graph retention",
+        pad=14,
+    )
+
+    save_figure(fig, "graph_filtering_waterfall")
+
+
+def plot_metagraph(
+    nodes: pd.DataFrame,
+    edges: pd.DataFrame,
+) -> None:
+    """Plot the four-node metagraph with paired directed arrows."""
     node_counts = nodes["node_type"].value_counts().to_dict()
 
     pair_counts = (
         edges.groupby(["source_type", "target_type"])
         .size()
-        .reset_index(name="edge_count")
+        .to_dict()
     )
-
-    graph = nx.DiGraph()
-
-    for node_type, count in node_counts.items():
-        graph.add_node(node_type, count=int(count))
-
-    for row in pair_counts.itertuples(index=False):
-        graph.add_edge(
-            row.source_type,
-            row.target_type,
-            weight=int(row.edge_count),
-        )
 
     positions = {
-        "drug": (-1.6, 0.0),
-        "gene": (0.0, 1.25),
-        "variant": (0.0, -1.25),
-        "phenotype": (1.6, 0.0),
+        "drug": (-2.2, 0.0),
+        "gene": (0.0, 1.55),
+        "variant": (0.0, -1.55),
+        "phenotype": (2.2, 0.0),
     }
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    graph = nx.DiGraph()
+    graph.add_nodes_from(positions)
 
-    maximum_count = max(node_counts.values())
+    node_sizes = {
+        "drug": 4200,
+        "gene": 6000,
+        "variant": 4700,
+        "phenotype": 3500,
+    }
 
-    node_sizes = [
-        2800 + 5000 * node_counts[node] / maximum_count
-        for node in graph.nodes
-    ]
+    fig, ax = plt.subplots(figsize=(10, 7.5))
+    ax.axis("off")
 
-    nx.draw_networkx_nodes(
-        graph,
-        positions,
-        node_size=node_sizes,
-        linewidths=1.5,
-        edgecolors="black",
-        ax=ax,
-    )
+    for node_type in positions:
+        nx.draw_networkx_nodes(
+            graph,
+            positions,
+            nodelist=[node_type],
+            node_color=[NODE_COLOURS[node_type]],
+            node_size=node_sizes[node_type],
+            edgecolors="black",
+            linewidths=1.3,
+            ax=ax,
+        )
 
-    maximum_edge_count = max(
-        data["weight"]
-        for _, _, data in graph.edges(data=True)
-    )
-
-    edge_widths = [
-        0.8 + 4.2 * graph[u][v]["weight"] / maximum_edge_count
-        for u, v in graph.edges
-    ]
-
-    nx.draw_networkx_edges(
-        graph,
-        positions,
-        width=edge_widths,
-        arrows=True,
-        arrowstyle="-|>",
-        arrowsize=18,
-        connectionstyle="arc3,rad=0.09",
-        node_size=node_sizes,
-        alpha=0.65,
-        ax=ax,
-    )
-
-    node_labels = {
-        node: f"{node.title()}\nn={node_counts[node]:,}"
-        for node in graph.nodes
+    labels = {
+        node_type: (
+            f"{node_type.title()}\n"
+            f"n={node_counts[node_type]:,}"
+        )
+        for node_type in positions
     }
 
     nx.draw_networkx_labels(
         graph,
         positions,
-        labels=node_labels,
-        font_size=10,
+        labels=labels,
+        font_size=11,
         font_weight="bold",
         ax=ax,
     )
 
-    edge_labels = {
-        (source, target): f"{data['weight']:,}"
-        for source, target, data in graph.edges(data=True)
+    node_pairs = [
+        ("drug", "gene"),
+        ("drug", "variant"),
+        ("gene", "variant"),
+        ("gene", "phenotype"),
+        ("variant", "phenotype"),
+    ]
+
+    label_positions = {
+        ("drug", "gene"): (-1.15, 0.90),
+        ("drug", "variant"): (-1.15, -0.90),
+        ("gene", "variant"): (0.34, 0.0),
+        ("gene", "phenotype"): (1.15, 0.90),
+        ("variant", "phenotype"): (1.15, -0.90),
     }
 
-    nx.draw_networkx_edge_labels(
-        graph,
-        positions,
-        edge_labels=edge_labels,
-        font_size=7,
-        rotate=False,
-        label_pos=0.48,
-        bbox={
-            "boxstyle": "round,pad=0.15",
-            "alpha": 0.8,
-            "linewidth": 0,
-        },
-        ax=ax,
-    )
+    for source, target in node_pairs:
+        forward = int(pair_counts.get((source, target), 0))
+        reverse = int(pair_counts.get((target, source), 0))
+
+        if forward == 0 and reverse == 0:
+            continue
+
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=[(source, target)],
+            arrowstyle="-|>",
+            arrowsize=20,
+            width=1.8,
+            edge_color="#555555",
+            connectionstyle="arc3,rad=0.13",
+            node_size=4500,
+            ax=ax,
+        )
+
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=[(target, source)],
+            arrowstyle="-|>",
+            arrowsize=20,
+            width=1.8,
+            edge_color="#555555",
+            connectionstyle="arc3,rad=0.13",
+            node_size=4500,
+            ax=ax,
+        )
+
+        if forward == reverse:
+            label = f"{forward:,} per direction"
+        else:
+            label = (
+                f"{source.title()}→{target.title()}: {forward:,}\n"
+                f"{target.title()}→{source.title()}: {reverse:,}"
+            )
+
+        x, y = label_positions[(source, target)]
+
+        ax.text(
+            x,
+            y,
+            label,
+            ha="center",
+            va="center",
+            fontsize=9,
+            bbox={
+                "boxstyle": "round,pad=0.25",
+                "facecolor": "white",
+                "edgecolor": "#BBBBBB",
+            },
+        )
 
     ax.set_title(
-        "Metagraph schema of the four-node pharmacogenomic graph"
+        "Four-node pharmacogenomic metagraph",
+        pad=20,
     )
+
     ax.text(
         0.5,
-        0.01,
-        "Arrow labels show directed edge counts. "
-        "Orientation supports message passing and does not necessarily "
-        "imply biological causality.",
+        0.03,
+        "Paired arrows preserve both ordered source–target orientations.",
         transform=ax.transAxes,
         ha="center",
-        va="bottom",
         fontsize=9,
+        color="#555555",
     )
-    ax.axis("off")
+
+    ax.set_xlim(-3.1, 3.1)
+    ax.set_ylim(-2.35, 2.3)
 
     save_figure(fig, "graph_metagraph_schema")
 
 
-def create_neighbour_maps(
-    edges: pd.DataFrame,
-) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
-    outgoing: dict[int, set[int]] = defaultdict(set)
-    undirected: dict[int, set[int]] = defaultdict(set)
-
-    for row in edges.itertuples(index=False):
-        source = int(row.source_idx)
-        target = int(row.target_idx)
-
-        outgoing[source].add(target)
-        undirected[source].add(target)
-        undirected[target].add(source)
-
-    return outgoing, undirected
-
-
-def rank_candidate_drugs(
-    nodes: pd.DataFrame,
-    edges: pd.DataFrame,
-) -> pd.DataFrame:
-    node_type = nodes.set_index("node_index")["node_type"].to_dict()
-    node_name = nodes.set_index("node_index")["node_name"].to_dict()
-
-    _, neighbours = create_neighbour_maps(edges)
-
-    evidence_by_drug: dict[int, set[str]] = defaultdict(set)
-
-    for row in edges.itertuples(index=False):
-        source = int(row.source_idx)
-        target = int(row.target_idx)
-
-        if node_type.get(source) == "drug":
-            evidence_by_drug[source].add(row.evidence)
-        if node_type.get(target) == "drug":
-            evidence_by_drug[target].add(row.evidence)
-
-    records = []
-
-    drug_nodes = nodes[nodes["node_type"] == "drug"]
-
-    for drug_row in drug_nodes.itertuples(index=False):
-        drug_idx = int(drug_row.node_index)
-        first_hop = neighbours.get(drug_idx, set())
-
-        genes = {
-            node
-            for node in first_hop
-            if node_type.get(node) == "gene"
-        }
-        variants = {
-            node
-            for node in first_hop
-            if node_type.get(node) == "variant"
-        }
-        direct_phenotypes = {
-            node
-            for node in first_hop
-            if node_type.get(node) == "phenotype"
-        }
-
-        mediated_phenotypes: set[int] = set()
-
-        for intermediate in genes | variants:
-            mediated_phenotypes.update(
-                node
-                for node in neighbours.get(intermediate, set())
-                if node_type.get(node) == "phenotype"
-            )
-
-        phenotypes = direct_phenotypes | mediated_phenotypes
-
-        evidence_count = len(evidence_by_drug.get(drug_idx, set()))
-
-        # Reward all four node types and manageable local complexity.
-        diversity_bonus = (
-            5 * int(len(genes) >= 2)
-            + 5 * int(len(variants) >= 1)
-            + 5 * int(len(phenotypes) >= 1)
-            + 3 * int(evidence_count >= 2)
-        )
-
-        size_penalty = max(
-            0,
-            len(first_hop) - 25,
-        ) * 0.2
-
-        score = (
-            diversity_bonus
-            + min(len(genes), 5)
-            + min(len(variants), 4)
-            + min(len(phenotypes), 4)
-            + min(evidence_count, 4)
-            - size_penalty
-        )
-
-        records.append(
-            {
-                "drug_idx": drug_idx,
-                "drug_id": drug_row.node_id,
-                "drug_name": node_name[drug_idx],
-                "direct_degree": len(first_hop),
-                "connected_genes": len(genes),
-                "connected_variants": len(variants),
-                "reachable_phenotypes": len(phenotypes),
-                "evidence_categories": evidence_count,
-                "subgraph_score": score,
-            }
-        )
-
-    candidates = pd.DataFrame(records).sort_values(
-        [
-            "subgraph_score",
-            "connected_genes",
-            "connected_variants",
-            "reachable_phenotypes",
-        ],
-        ascending=False,
+def plot_representative_subgraph() -> None:
+    """Plot the final panitumumab-centred representative subgraph."""
+    nodes = pd.read_csv(
+        AUDIT_DIR / "representative_subgraph_final_nodes.csv"
+    )
+    edges = pd.read_csv(
+        AUDIT_DIR / "representative_subgraph_final_edges.csv"
     )
 
-    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-    candidates.to_csv(
-        AUDIT_DIR / "representative_subgraph_candidates.csv",
-        index=False,
-    )
+    graph = nx.DiGraph()
 
-    return candidates
-
-
-def choose_representative_nodes(
-    drug_idx: int,
-    nodes: pd.DataFrame,
-    edges: pd.DataFrame,
-) -> set[int]:
-    node_type = nodes.set_index("node_index")["node_type"].to_dict()
-
-    incident = edges[
-        (edges["source_idx"] == drug_idx)
-        | (edges["target_idx"] == drug_idx)
-    ].copy()
-
-    neighbour_ids = set(incident["source_idx"]) | set(
-        incident["target_idx"]
-    )
-    neighbour_ids.discard(drug_idx)
-
-    def ranked_neighbours(
-        requested_type: str,
-        limit: int,
-    ) -> list[int]:
-        candidates = [
-            int(node)
-            for node in neighbour_ids
-            if node_type.get(int(node)) == requested_type
-        ]
-
-        degree = (
-            pd.concat(
-                [
-                    edges["source_idx"],
-                    edges["target_idx"],
-                ]
-            )
-            .value_counts()
-            .to_dict()
-        )
-
-        return sorted(
-            candidates,
-            key=lambda node: degree.get(node, 0),
-            reverse=True,
-        )[:limit]
-
-    selected_genes = ranked_neighbours("gene", 3)
-    selected_variants = ranked_neighbours("variant", 3)
-    selected_phenotypes = ranked_neighbours("phenotype", 2)
-
-    intermediate_nodes = selected_genes + selected_variants
-
-    phenotype_candidates: set[int] = set(selected_phenotypes)
-
-    for intermediate in intermediate_nodes:
-        connected = edges[
-            (edges["source_idx"] == intermediate)
-            | (edges["target_idx"] == intermediate)
-        ]
-
-        connected_nodes = set(connected["source_idx"]) | set(
-            connected["target_idx"]
-        )
-
-        phenotype_candidates.update(
-            int(node)
-            for node in connected_nodes
-            if node_type.get(int(node)) == "phenotype"
-        )
-
-    phenotype_degree = (
-        pd.concat(
-            [
-                edges.loc[
-                    edges["source_type"] == "phenotype",
-                    "source_idx",
-                ],
-                edges.loc[
-                    edges["target_type"] == "phenotype",
-                    "target_idx",
-                ],
-            ]
-        )
-        .value_counts()
-        .to_dict()
-    )
-
-    selected_phenotypes = sorted(
-        phenotype_candidates,
-        key=lambda node: phenotype_degree.get(node, 0),
-        reverse=True,
-    )[:3]
-
-    return {
-        drug_idx,
-        *selected_genes,
-        *selected_variants,
-        *selected_phenotypes,
-    }
-
-
-def collapse_reverse_edges(
-    sub_edges: pd.DataFrame,
-) -> pd.DataFrame:
-    """Keep one readable record per node pair and evidence/association."""
-    collapsed = sub_edges.copy()
-
-    collapsed["pair_min"] = collapsed[
-        ["source_idx", "target_idx"]
-    ].min(axis=1)
-    collapsed["pair_max"] = collapsed[
-        ["source_idx", "target_idx"]
-    ].max(axis=1)
-
-    collapsed = collapsed.sort_values(
-        [
-            "pair_min",
-            "pair_max",
-            "evidence",
-            "association",
-            "source_idx",
-            "target_idx",
-        ]
-    )
-
-    collapsed = collapsed.drop_duplicates(
-        [
-            "pair_min",
-            "pair_max",
-            "evidence",
-            "association",
-        ]
-    )
-
-    return collapsed.drop(
-        columns=["pair_min", "pair_max"]
-    )
-
-
-def plot_representative_subgraph(
-    nodes: pd.DataFrame,
-    edges: pd.DataFrame,
-    requested_drug_id: str | None = None,
-) -> None:
-    candidates = rank_candidate_drugs(nodes, edges)
-
-    eligible = candidates[
-        (candidates["connected_genes"] >= 2)
-        & (candidates["connected_variants"] >= 1)
-        & (candidates["reachable_phenotypes"] >= 1)
-    ]
-
-    if eligible.empty:
-        raise RuntimeError(
-            "No drug satisfies the representative-subgraph criteria."
-        )
-
-    if requested_drug_id is None:
-        selected_drug = eligible.iloc[0]
-    else:
-        matched = eligible[
-            eligible["drug_id"] == requested_drug_id
-        ]
-
-        if matched.empty:
-            raise ValueError(
-                f"Drug ID {requested_drug_id!r} was not found among "
-                "eligible representative-subgraph candidates."
-            )
-
-        selected_drug = matched.iloc[0]
-
-    drug_idx = int(selected_drug["drug_idx"])
-
-    selected_nodes = choose_representative_nodes(
-        drug_idx,
-        nodes,
-        edges,
-    )
-
-    sub_nodes = nodes[
-        nodes["node_index"].isin(selected_nodes)
-    ].copy()
-
-    sub_edges = edges[
-        edges["source_idx"].isin(selected_nodes)
-        & edges["target_idx"].isin(selected_nodes)
-    ].copy()
-
-    sub_edges = collapse_reverse_edges(sub_edges)
-
-    graph = nx.MultiDiGraph()
-
-    for row in sub_nodes.itertuples(index=False):
+    for row in nodes.itertuples(index=False):
         graph.add_node(
             int(row.node_index),
             node_name=row.node_name,
             node_type=row.node_type,
         )
 
-    for row in sub_edges.itertuples(index=False):
+    display_edges = (
+        edges.sort_values(
+            [
+                "source_idx",
+                "target_idx",
+                "evidence",
+            ]
+        )
+        .drop_duplicates(
+            [
+                "source_idx",
+                "target_idx",
+            ]
+        )
+    )
+
+    for row in display_edges.itertuples(index=False):
         graph.add_edge(
             int(row.source_idx),
             int(row.target_idx),
             evidence=row.evidence,
-            association=row.association,
         )
 
-    position_groups = {
-        "drug": (-2.4, 0.0),
-        "gene": (-0.8, 0.0),
-        "variant": (0.8, -1.1),
-        "phenotype": (2.3, 0.0),
+    members = {
+        node_type: nodes.loc[
+            nodes["node_type"] == node_type,
+            "node_index",
+        ].astype(int).tolist()
+        for node_type in NODE_COLOURS
+    }
+
+    x_positions = {
+        "drug": -3.0,
+        "gene": -1.1,
+        "variant": 1.0,
+        "phenotype": 3.0,
+    }
+
+    y_positions = {
+        1: [0.0],
+        2: [1.0, -1.0],
+        3: [1.55, 0.0, -1.55],
     }
 
     positions: dict[int, tuple[float, float]] = {}
 
-    for node_type_name in [
-        "drug",
-        "gene",
-        "variant",
-        "phenotype",
-    ]:
-        members = [
-            node
-            for node, data in graph.nodes(data=True)
-            if data["node_type"] == node_type_name
-        ]
-
-        base_x, base_y = position_groups[node_type_name]
-
-        if len(members) == 1:
-            y_values = [base_y]
-        else:
-            y_values = np.linspace(
-                base_y + 1.2,
-                base_y - 1.2,
-                len(members),
+    for node_type, node_ids in members.items():
+        for node_id, y_value in zip(
+            node_ids,
+            y_positions[len(node_ids)],
+        ):
+            positions[node_id] = (
+                x_positions[node_type],
+                y_value,
             )
 
-        for node, y_value in zip(members, y_values):
-            positions[node] = (base_x, float(y_value))
+    fig, ax = plt.subplots(figsize=(13, 7.5))
+    ax.axis("off")
 
-    fig, ax = plt.subplots(figsize=(13, 8))
-
-    for node_type_name, shape in NODE_SHAPES.items():
-        members = [
-            node
-            for node, data in graph.nodes(data=True)
-            if data["node_type"] == node_type_name
-        ]
-
-        if not members:
-            continue
-
-        sizes = [
-            3300 if node == drug_idx else 2200
-            for node in members
-        ]
-
+    for node_type, node_ids in members.items():
         nx.draw_networkx_nodes(
             graph,
             positions,
-            nodelist=members,
-            node_shape=shape,
-            node_size=sizes,
-            linewidths=1.5,
+            nodelist=node_ids,
+            node_shape=NODE_SHAPES[node_type],
+            node_color=NODE_COLOURS[node_type],
+            node_size=2300 if node_type != "drug" else 2900,
             edgecolors="black",
-            label=node_type_name.title(),
+            linewidths=1.3,
             ax=ax,
         )
 
-    edge_list = list(graph.edges(keys=True))
+    for evidence, colour in EVIDENCE_COLOURS.items():
+        selected_edges = [
+            (source, target)
+            for source, target, data in graph.edges(data=True)
+            if data["evidence"] == evidence
+        ]
 
-    nx.draw_networkx_edges(
-        graph,
-        positions,
-        edgelist=edge_list,
-        arrows=True,
-        arrowstyle="-|>",
-        arrowsize=16,
-        width=1.3,
-        alpha=0.7,
-        connectionstyle="arc3,rad=0.08",
-        ax=ax,
-    )
+        if not selected_edges:
+            continue
+
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=selected_edges,
+            edge_color=colour,
+            width=1.8,
+            arrows=True,
+            arrowstyle="-|>",
+            arrowsize=15,
+            alpha=0.8,
+            connectionstyle="arc3,rad=0.04",
+            ax=ax,
+        )
 
     labels = {
-        node: (
-            data["node_name"]
-            if len(str(data["node_name"])) <= 24
-            else str(data["node_name"])[:21] + "..."
+        node: wrap_label(
+            data["node_name"],
+            width=17
+            if data["node_type"] == "phenotype"
+            else 13,
         )
         for node, data in graph.nodes(data=True)
     }
@@ -733,124 +559,105 @@ def plot_representative_subgraph(
         graph,
         positions,
         labels=labels,
-        font_size=8,
+        font_size=8.5,
         font_weight="bold",
         ax=ax,
     )
 
-    edge_labels = {}
-
-    for source, target, key, data in graph.edges(
-        keys=True,
-        data=True,
-    ):
-        association = data["association"].replace("_", " ")
-        edge_labels[(source, target, key)] = (
-            f"{data['evidence']} · {association}"
+    node_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=NODE_SHAPES[node_type],
+            linestyle="",
+            markerfacecolor=NODE_COLOURS[node_type],
+            markeredgecolor="black",
+            markersize=9,
+            label=node_type.title(),
         )
+        for node_type in [
+            "drug",
+            "gene",
+            "variant",
+            "phenotype",
+        ]
+    ]
 
-    nx.draw_networkx_edge_labels(
-        graph,
-        positions,
-        edge_labels=edge_labels,
-        font_size=6.5,
-        rotate=False,
-        label_pos=0.5,
-        bbox={
-            "boxstyle": "round,pad=0.1",
-            "alpha": 0.75,
-            "linewidth": 0,
-        },
-        ax=ax,
+    present_evidence = sorted(
+        display_edges["evidence"].unique()
     )
 
-    ax.legend(
+    evidence_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=EVIDENCE_COLOURS[evidence],
+            linewidth=2.5,
+            label=evidence.title(),
+        )
+        for evidence in present_evidence
+    ]
+
+    node_legend = ax.legend(
+        handles=node_handles,
+        title="Node type",
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.02),
+        bbox_to_anchor=(0.30, -0.05),
         ncol=4,
+        frameon=False,
+    )
+    ax.add_artist(node_legend)
+
+    ax.legend(
+        handles=evidence_handles,
+        title="Evidence",
+        loc="upper center",
+        bbox_to_anchor=(0.78, -0.05),
+        ncol=len(evidence_handles),
         frameon=False,
     )
 
     ax.set_title(
-        "Representative drug-centred pharmacogenomic subgraph\n"
-        f"Selected drug: {selected_drug['drug_name']}"
+        "Representative panitumumab-centred subgraph",
+        pad=18,
     )
 
-    ax.text(
-        0.5,
-        0.01,
-        "One relationship orientation is shown per matched "
-        "evidence–association pair for readability.",
-        transform=ax.transAxes,
-        ha="center",
-        va="bottom",
-        fontsize=9,
-    )
+    ax.set_xlim(-3.9, 3.9)
+    ax.set_ylim(-2.5, 2.35)
 
-    ax.axis("off")
-
-    safe_drug_name = (
-        str(selected_drug["drug_name"])
-        .lower()
-        .replace(" ", "_")
-        .replace("/", "_")
+    fig.subplots_adjust(
+        bottom=0.20,
+        top=0.90,
+        left=0.04,
+        right=0.96,
     )
 
     save_figure(
         fig,
-        f"graph_representative_subgraph_{safe_drug_name}",
+        "graph_representative_subgraph_final",
     )
-
-    sub_nodes.to_csv(
-        AUDIT_DIR / "representative_subgraph_nodes.csv",
-        index=False,
-    )
-    sub_edges.to_csv(
-        AUDIT_DIR / "representative_subgraph_edges.csv",
-        index=False,
-    )
-
-    print("\nRepresentative subgraph")
-    print("-----------------------")
-    print(f"Drug: {selected_drug['drug_name']}")
-    print(f"Drug ID: {selected_drug['drug_id']}")
-    print(f"Displayed nodes: {len(sub_nodes)}")
-    print(f"Displayed edges: {len(sub_edges)}")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Generate graph-construction figures."
-    )
-    parser.add_argument(
-        "--drug-id",
-        type=str,
-        default=None,
-        help=(
-            "Optional PharmGKB drug ID for the representative "
-            "subgraph. When omitted, the highest-ranked eligible "
-            "drug is selected automatically."
-        ),
-    )
-    return parser.parse_args()
 
 
 def main() -> None:
-    args = parse_args()
-    nodes, edges, manifest = load_artifacts()
+    """Generate all graph-construction figures."""
+    set_plot_defaults()
 
-    plot_filtering_waterfall(manifest)
+    nodes, edges, manifest = load_data()
+
     plot_node_composition(nodes)
+    plot_filtering_flow(manifest)
     plot_metagraph(nodes, edges)
-    plot_representative_subgraph(
-        nodes,
-        edges,
-        requested_drug_id=args.drug_id,
-    )
+    plot_representative_subgraph()
 
-    print("\nGenerated figures:")
-    for path in sorted(RESULTS_DIR.glob("graph_*")):
-        print(f"  {path}")
+    print("Overwritten final figures:")
+
+    for filename in [
+        "graph_filtering_waterfall.png",
+        "graph_node_composition.png",
+        "graph_metagraph_schema.png",
+        "graph_representative_subgraph_final.png",
+    ]:
+        print(f"  {FIGURE_DIR / filename}")
 
 
 if __name__ == "__main__":
