@@ -1,0 +1,19 @@
+{
+  "seeds": [42, 123, 2026],
+  "train_fraction": 0.80,
+  "validation_fraction": 0.10,
+  "test_fraction": 0.10,
+  "minimum_associated_pairs": 2,
+  "evaluation_association": "associated",
+  "primary_protocol": "dg_context",
+  "protocols": [
+    "dg_context",
+    "strict_cold"
+  ],
+  "ineligible_drug_policy": "training_context_only",
+  "split_unit": "drug",
+  "canonical_pair_types": [
+    "drug",
+    "gene"
+  ]
+}
