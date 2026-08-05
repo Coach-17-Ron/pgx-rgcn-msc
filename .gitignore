@@ -41,3 +41,7 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local Python environments
+.venv-pyg/
+.venv-pyg-p100/

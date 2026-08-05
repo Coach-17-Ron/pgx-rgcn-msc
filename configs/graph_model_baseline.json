@@ -1,0 +1,16 @@
+{
+  "models": ["gcn", "rgcn", "rgat"],
+  "protocols": ["dg_context", "strict_cold"],
+  "seeds": [42, 123, 2026],
+  "embedding_dim": 64,
+  "num_bases": 8,
+  "dropout": 0.2,
+  "learning_rate": 0.001,
+  "weight_decay": 0.00001,
+  "epochs": 300,
+  "patience": 30,
+  "validation_interval": 5,
+  "negatives_per_positive": 1,
+  "gradient_clip_norm": 1.0,
+  "query_batch_size": 64
+}
