@@ -72,6 +72,8 @@ def filtered_gene_ranks(
     gene_indices: torch.Tensor,
     known_positive_pairs: torch.Tensor,
     query_batch_size: int = 64,
+    molecular_features: torch.Tensor | None = None,
+    has_molecular_features: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Rank each true gene against every gene candidate."""
     model.eval()
@@ -80,6 +82,8 @@ def filtered_gene_ranks(
         node_type=node_type,
         edge_index=edge_index,
         edge_type=edge_type,
+        molecular_features=molecular_features,
+        has_molecular_features=has_molecular_features,
     )
 
     positive_lookup = build_positive_lookup(
@@ -167,6 +171,8 @@ def evaluate_filtered_ranking(
     gene_indices: torch.Tensor,
     known_positive_pairs: torch.Tensor,
     query_batch_size: int = 64,
+    molecular_features: torch.Tensor | None = None,
+    has_molecular_features: torch.Tensor | None = None,
 ) -> tuple[dict[str, Any], torch.Tensor]:
     ranks = filtered_gene_ranks(
         model=model,
@@ -177,6 +183,8 @@ def evaluate_filtered_ranking(
         gene_indices=gene_indices,
         known_positive_pairs=known_positive_pairs,
         query_batch_size=query_batch_size,
+        molecular_features=molecular_features,
+        has_molecular_features=has_molecular_features,
     )
 
     return metrics_from_ranks(ranks), ranks
