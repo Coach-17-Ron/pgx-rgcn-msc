@@ -1,0 +1,7 @@
+positive_support_score,external_validation_category,pubmed_pair_evidence_class,candidate_pairs,unique_drugs,unique_genes,median_validation_priority_score
+3,positive_direct_support,direct_supported,4,4,3,0.3688641283612432
+2,positive_but_mixed,direct_mixed_evidence,3,3,3,0.4300768057840044
+1,positive_indirect_support,indirect_mechanistic_support,2,2,2,0.5938442135710329
+0,no_evidence_retrieved,no_evidence_found_in_current_search,18,17,14,0.378252481125951
+0,null_evidence_only,direct_null_only,2,2,2,0.485532581975542
+0,retrieved_but_not_supporting,no_supporting_pair_evidence,1,1,1,0.3544371537339962
