@@ -47,6 +47,12 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         choices=["auto", "cpu", "cuda"],
     )
+
+    parser.add_argument(
+        "--feature-mode",
+        choices=["id", "molecular"],
+        default="id",
+    )
     parser.add_argument(
         "--query-batch-size",
         type=int,
@@ -102,6 +108,7 @@ def main() -> None:
 
     run_dir = (
         args.model_root
+        / args.feature_mode
         / args.model
         / args.protocol
         / f"seed_{args.seed}"
@@ -131,6 +138,18 @@ def main() -> None:
         weights_only=False,
     )
 
+    checkpoint_feature_mode = checkpoint.get(
+        "feature_mode",
+        "id",
+    )
+
+    if checkpoint_feature_mode != args.feature_mode:
+        raise ValueError(
+            "Requested feature mode does not match checkpoint: "
+            f"{args.feature_mode!r} versus "
+            f"{checkpoint_feature_mode!r}."
+        )
+
     model = PGxGraphModel(
         model_name=checkpoint["model_name"],
         num_nodes=int(checkpoint["num_nodes"]),
@@ -139,6 +158,13 @@ def main() -> None:
         embedding_dim=int(checkpoint["embedding_dim"]),
         num_bases=int(checkpoint["num_bases"]),
         dropout=float(checkpoint["dropout"]),
+        feature_mode=checkpoint_feature_mode,
+        molecular_feature_dim=checkpoint.get(
+            "molecular_feature_dim"
+        ),
+        drug_type_index=int(
+            checkpoint["node_type_to_index"]["drug"]
+        ),
     )
 
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -148,6 +174,30 @@ def main() -> None:
     node_type = bundle["node_type"].to(device)
     edge_index = bundle["edge_index"].to(device)
     edge_type = bundle["edge_type"].to(device)
+
+    molecular_features = None
+    has_molecular_features = None
+
+    if args.feature_mode == "molecular":
+        molecular_features = bundle.get(
+            "molecular_features"
+        )
+        has_molecular_features = bundle.get(
+            "has_molecular_features"
+        )
+
+        if (
+            molecular_features is None
+            or has_molecular_features is None
+        ):
+            raise ValueError(
+                "Molecular tensors are missing from the bundle."
+            )
+
+        molecular_features = molecular_features.to(device)
+        has_molecular_features = (
+            has_molecular_features.to(device)
+        )
 
     test_pairs = bundle[
         "test_positive_pairs"
@@ -175,10 +225,13 @@ def main() -> None:
             gene_indices=gene_indices,
             known_positive_pairs=known_positive_pairs,
             query_batch_size=args.query_batch_size,
+            molecular_features=molecular_features,
+            has_molecular_features=has_molecular_features,
         )
 
     output = {
         "model": args.model,
+        "feature_mode": args.feature_mode,
         "protocol": args.protocol,
         "seed": args.seed,
         "device": str(device),
@@ -206,6 +259,7 @@ def main() -> None:
 
     print("Test evaluation complete")
     print(f"Model: {args.model}")
+    print(f"Feature mode: {args.feature_mode}")
     print(f"Protocol: {args.protocol}")
     print(f"Seed: {args.seed}")
     print(f"Device: {device}")

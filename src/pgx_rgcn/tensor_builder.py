@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -117,6 +118,115 @@ def build_node_type_mapping() -> dict[str, int]:
     }
 
 
+def build_molecular_feature_tensors(
+    *,
+    nodes: pd.DataFrame,
+    fingerprint_path: Path,
+    metadata_path: Path,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Align drug fingerprints to the full graph node index space."""
+    fingerprints = np.load(fingerprint_path)
+
+    metadata = pd.read_parquet(metadata_path).sort_values(
+        "fingerprint_row"
+    )
+
+    required_metadata_columns = {
+        "node_index",
+        "node_id",
+        "has_fingerprint",
+        "fingerprint_row",
+    }
+
+    missing_columns = required_metadata_columns.difference(
+        metadata.columns
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "Molecular metadata missing columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+    if len(metadata) != fingerprints.shape[0]:
+        raise AssertionError(
+            "Fingerprint matrix row count does not match metadata."
+        )
+
+    expected_rows = list(range(len(metadata)))
+    observed_rows = (
+        metadata["fingerprint_row"]
+        .astype(int)
+        .tolist()
+    )
+
+    if observed_rows != expected_rows:
+        raise AssertionError(
+            "Fingerprint rows must be contiguous and ordered."
+        )
+
+    graph_drugs = (
+        nodes.loc[
+            nodes["node_type"] == "drug",
+            ["node_index", "node_id"],
+        ]
+        .sort_values("node_index")
+        .reset_index(drop=True)
+    )
+
+    aligned_metadata = (
+        metadata[
+            [
+                "node_index",
+                "node_id",
+                "has_fingerprint",
+            ]
+        ]
+        .sort_values("node_index")
+        .reset_index(drop=True)
+    )
+
+    if not graph_drugs.equals(
+        aligned_metadata[
+            ["node_index", "node_id"]
+        ]
+    ):
+        raise AssertionError(
+            "Molecular metadata does not align with graph drug nodes."
+        )
+
+    num_nodes = len(nodes)
+    feature_dim = int(fingerprints.shape[1])
+
+    full_features = np.zeros(
+        (num_nodes, feature_dim),
+        dtype=np.uint8,
+    )
+
+    full_mask = np.zeros(
+        num_nodes,
+        dtype=bool,
+    )
+
+    drug_node_indices = aligned_metadata[
+        "node_index"
+    ].astype(int).to_numpy()
+
+    full_features[drug_node_indices] = fingerprints.astype(
+        np.uint8,
+        copy=False,
+    )
+
+    full_mask[drug_node_indices] = aligned_metadata[
+        "has_fingerprint"
+    ].astype(bool).to_numpy()
+
+    return (
+        torch.from_numpy(full_features),
+        torch.from_numpy(full_mask),
+    )
+
+
 def pairs_to_tensor(
     pairs: pd.DataFrame,
 ) -> torch.Tensor:
@@ -222,6 +332,7 @@ def build_tensor_bundle(
     graph_dir: Path,
     split_dir: Path,
     output_path: Path,
+    molecular_feature_dir: Path | None = None,
 ) -> dict[str, Any]:
     nodes, train_edges, validation_pairs, test_pairs = (
         load_graph_inputs(
@@ -262,6 +373,24 @@ def build_tensor_bundle(
         dtype=torch.long,
     )
 
+    molecular_features = None
+    has_molecular_features = None
+
+    if molecular_feature_dir is not None:
+        molecular_features, has_molecular_features = (
+            build_molecular_feature_tensors(
+                nodes=nodes,
+                fingerprint_path=(
+                    molecular_feature_dir
+                    / "morgan_radius2_2048.npy"
+                ),
+                metadata_path=(
+                    molecular_feature_dir
+                    / "morgan_radius2_2048_metadata.parquet"
+                ),
+            )
+        )
+
     bundle = {
         "num_nodes": int(len(nodes)),
         "num_relations": int(len(relation_to_index)),
@@ -283,6 +412,13 @@ def build_tensor_bundle(
         ),
         "relation_to_index": relation_to_index,
         "node_type_to_index": node_type_to_index,
+        "molecular_features": molecular_features,
+        "has_molecular_features": has_molecular_features,
+        "molecular_feature_dim": (
+            int(molecular_features.shape[1])
+            if molecular_features is not None
+            else None
+        ),
     }
 
     output_path.parent.mkdir(

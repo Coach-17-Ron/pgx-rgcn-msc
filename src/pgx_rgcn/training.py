@@ -86,6 +86,7 @@ def train_one_run(
     output_dir: Path,
     device_name: str = "auto",
     maximum_epochs: int | None = None,
+    feature_mode: str = "id",
 ) -> dict[str, Any]:
     """Train one model on one protocol and seed."""
     config = load_json(config_path)
@@ -112,6 +113,43 @@ def train_one_run(
     node_type = bundle["node_type"].to(device)
     edge_index = bundle["edge_index"].to(device)
     edge_type = bundle["edge_type"].to(device)
+
+    feature_mode = feature_mode.lower()
+
+    if feature_mode not in {"id", "molecular"}:
+        raise ValueError(
+            "feature_mode must be either 'id' or 'molecular'."
+        )
+
+    molecular_features = None
+    has_molecular_features = None
+    molecular_feature_dim = None
+
+    if feature_mode == "molecular":
+        molecular_features = bundle.get(
+            "molecular_features"
+        )
+        has_molecular_features = bundle.get(
+            "has_molecular_features"
+        )
+        molecular_feature_dim = bundle.get(
+            "molecular_feature_dim"
+        )
+
+        if (
+            molecular_features is None
+            or has_molecular_features is None
+            or molecular_feature_dim is None
+        ):
+            raise ValueError(
+                "The selected tensor bundle does not contain "
+                "molecular features."
+            )
+
+        molecular_features = molecular_features.to(device)
+        has_molecular_features = (
+            has_molecular_features.to(device)
+        )
 
     train_positive_pairs_cpu = bundle[
         "train_positive_pairs"
@@ -141,6 +179,15 @@ def train_one_run(
         embedding_dim=int(config["embedding_dim"]),
         num_bases=int(config["num_bases"]),
         dropout=float(config["dropout"]),
+        feature_mode=feature_mode,
+        molecular_feature_dim=(
+            int(molecular_feature_dim)
+            if molecular_feature_dim is not None
+            else None
+        ),
+        drug_type_index=int(
+            bundle["node_type_to_index"]["drug"]
+        ),
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -204,6 +251,8 @@ def train_one_run(
             node_type=node_type,
             edge_index=edge_index,
             edge_type=edge_type,
+            molecular_features=molecular_features,
+            has_molecular_features=has_molecular_features,
         )
 
         positive_scores = model.score_pairs(
@@ -267,6 +316,8 @@ def train_one_run(
                 query_batch_size=int(
                     config["query_batch_size"]
                 ),
+                molecular_features=molecular_features,
+                has_molecular_features=has_molecular_features,
             )
 
             validation_mrr = float(
@@ -352,6 +403,12 @@ def train_one_run(
         ),
         "num_bases": int(config["num_bases"]),
         "dropout": float(config["dropout"]),
+        "feature_mode": feature_mode,
+        "molecular_feature_dim": (
+            int(molecular_feature_dim)
+            if molecular_feature_dim is not None
+            else None
+        ),
         "best_epoch": int(best_epoch),
         "best_validation_mrr": float(
             best_validation_mrr
@@ -380,6 +437,17 @@ def train_one_run(
         "protocol": protocol,
         "seed": int(seed),
         "device": str(device),
+        "feature_mode": feature_mode,
+        "molecular_feature_dim": (
+            int(molecular_feature_dim)
+            if molecular_feature_dim is not None
+            else None
+        ),
+        "drugs_with_molecular_features": (
+            int(has_molecular_features.sum().item())
+            if has_molecular_features is not None
+            else 0
+        ),
         "trainable_parameters": int(
             count_parameters(model)
         ),
@@ -409,6 +477,7 @@ def train_one_run(
     print("Protocol:", protocol)
     print("Seed:", seed)
     print("Device:", device)
+    print("Feature mode:", feature_mode)
     print("Best epoch:", best_epoch)
     print(
         "Best validation MRR:",

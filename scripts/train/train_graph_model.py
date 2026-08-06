@@ -37,6 +37,16 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--feature-mode",
+        choices=["id", "molecular"],
+        default="id",
+        help=(
+            "Use learned node-ID features or molecular "
+            "fingerprints for drug nodes."
+        ),
+    )
+
+    parser.add_argument(
         "--max-epochs",
         type=int,
         default=None,
@@ -78,6 +88,7 @@ def main() -> None:
 
     output_dir = (
         args.output_root
+        / args.feature_mode
         / args.model
         / args.protocol
         / f"seed_{args.seed}"
@@ -92,6 +103,7 @@ def main() -> None:
         output_dir=output_dir,
         device_name=args.device,
         maximum_epochs=args.max_epochs,
+        feature_mode=args.feature_mode,
     )
 
 

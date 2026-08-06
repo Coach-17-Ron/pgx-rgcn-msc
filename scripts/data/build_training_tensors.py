@@ -42,6 +42,16 @@ def parse_args() -> argparse.Namespace:
         default=Path("artifacts/tensors"),
     )
 
+    parser.add_argument(
+        "--molecular-feature-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory containing the molecular "
+            "fingerprint matrix and metadata."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -65,6 +75,7 @@ def main() -> None:
         graph_dir=args.graph_dir,
         split_dir=split_dir,
         output_path=output_path,
+        molecular_feature_dir=args.molecular_feature_dir,
     )
 
     print("Saved:", output_path)
@@ -83,6 +94,20 @@ def main() -> None:
         "Test positives:",
         bundle["test_positive_pairs"].shape[0],
     )
+
+    if bundle["molecular_features"] is not None:
+        print(
+            "Molecular feature shape:",
+            tuple(bundle["molecular_features"].shape),
+        )
+        print(
+            "Drugs with molecular features:",
+            int(
+                bundle["has_molecular_features"]
+                .sum()
+                .item()
+            ),
+        )
 
 
 if __name__ == "__main__":
